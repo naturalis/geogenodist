@@ -126,14 +126,14 @@ sub get_geographical_distances {
 	no warnings 'uninitialized';
 	
 	# outer loop of pairwise comparisons
-	for my $i ( 0 .. $#seq - 1 ) {
+	OUTER: for my $i ( 0 .. $#seq - 1 ) {
 		my $s1 = Bio::Phylo::Matrices::Datum->new_from_bioperl( $seq[$i] );
 		my $def1 = join ' ', $seq[$i]->id, $seq[$i]->desc;
 		my $s1name = get_fields( $def1, $sid );
 		my @s1xy = get_fields( $def1, $lon, $lat );
 		
 		# inner loop of pairwise comparisons
-		for my $j ( $i + 1 .. $#seq ) {
+		INNER: for my $j ( $i + 1 .. $#seq ) {
 			my $s2 = Bio::Phylo::Matrices::Datum->new_from_bioperl( $seq[$j] );
 			my $def2 = join ' ', $seq[$j]->id, $seq[$j]->desc;
 			my $s2name = get_fields( $def2, $sid );
@@ -160,6 +160,12 @@ sub get_geographical_distances {
 sub calc_dist {
 	my @points = @_;
 	my @r = @points;
+	for my $i ( 0 .. $#r ) {
+		if ( $r[$i] < -90 or $r[$i] > 90 ) {
+			$log->warn("coordinate out of allowed range (-90 < value < 90): $r[$i]");
+			return undef;
+		}
+	}
 	my $command = <<"R";
 library(geosphere);
 xy1 <- rbind(c($r[0],$r[1]))

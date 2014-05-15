@@ -41,15 +41,21 @@ sub usage {
 sub get_args {
 	my $verbosity = WARN;
 	my $fasta;
+	my $reverse;
 	GetOptions(
 		'verbose+'  => \$verbosity,
 		'fasta=s'   => \$fasta,
 		'binsize=i' => \$binsize,
+		'reverse'   => \$reverse,
 	);	
 	if ( not -e $fasta ) {
 		die usage();
-	}
+	}	
 	$log->VERBOSE( '-level' => $verbosity, '-class' => 'main' );
+	if ( $reverse ) {
+		$log->info("reversing lon,lat <=> lat,lon");
+		( $lon, $lat ) = ( $lat, $lon );
+	}
 	return $fasta, $binsize;
 }
 
@@ -215,6 +221,7 @@ sub main {
 		
 		# iterate over specimen pairs
 		for my $i ( 0 .. $#gendist ) {
+			no warnings 'uninitialized';
 			my @record = (
 				$bin,
 				$gendist[$i]->[0],

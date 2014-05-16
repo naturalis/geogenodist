@@ -232,10 +232,13 @@ sub main {
 	$log->info("going to process sequences from $fasta");
 	$log->info("going to process all bins with more than $binsize specimens");
 	
+	# open from gunzip -c if file is gz compressed
+	my $command = ( $fasta =~ /\.gz$/ ) ? "gunzip -c $fasta |" : $fasta;
+	
 	# instantiate sequence reader
 	my $seqio = Bio::SeqIO->new(
 		'-format' => 'fasta',
-		'-file'   => $fasta,
+		'-file'   => $command,
 	);
 	
 	# print output header

@@ -4,18 +4,39 @@ use warnings;
 use Getopt::Long;
 use List::Util 'sum';
 use Scalar::Util 'looks_like_number';
+use Bio::Phylo::Util::Logger ':levels';
 
 # returns the average for each bin that has >= 10 pairwise comparisons
 
+# process command line arguments
+my $verbosity = WARN;
 my $minpairs = 10;
 my $infile;
 GetOptions(
 	'minpairs=i' => \$minpairs,
 	'infile=s'   => \$infile,
+	'verbose+'   => \$verbosity,
 );
 
+# instantiate helper objects
+my $log = Bio::Phylo::Util::Logger->new(
+	'-level' => $verbosity,
+	'-class' => 'main',
+);
+
+# print the output header
 print "bin\tgenpergeo\tmeanlat\n";
-open my $fh, '<', $infile or die $!;
+
+# compose the parameters to open the file
+my $fh;
+if ( $infile =~ /\.gz$/ ) {
+	open $fh, '-|', "gunzip -c $infile" or die $!;
+}
+else {
+	open $fh, '<', $infile or die $!;
+}
+
+# start reading the file
 my @header;
 my $bin;
 my ( @meanlat, @geodist, @gendist );
@@ -23,13 +44,13 @@ LINE: while(<$fh>) {
 	chomp;
 	if ( not @header ) {
 		@header = split /\t/, $_;
-		warn "read header\n";
+		$log->info("read header");
 		next LINE;
 	}
 	my @record = split /\t/, $_;	
 	if ( not $bin ) {
 		$bin = $record[0];
-		warn "started the first bin: $bin\n";
+		$log->info("started the first bin: $bin");
 		next LINE if not looks_like_number $record[-2];
 		@meanlat = ( $record[-1] );
 		@geodist = ( $record[-2] );
@@ -37,7 +58,7 @@ LINE: while(<$fh>) {
 		next LINE;
 	}
 	if ( $bin eq $record[0] ) {
-		warn "extending bin $bin\n";
+		$log->info("extending bin $bin");
 		next LINE if not looks_like_number $record[-2];		
 		push @meanlat, $record[-1];
 		push @geodist, $record[-2];
@@ -49,14 +70,14 @@ LINE: while(<$fh>) {
 			print_out();
 		}
 		else {
-			warn "too few comparisons in $bin, skipping\n";
+			$log->warn("too few comparisons in $bin, skipping");
 		}		
 		$bin = $record[0];
 		next LINE if not looks_like_number $record[-2];		
 		@meanlat = ( $record[-1] );
 		@geodist = ( $record[-2] );
 		@gendist = ( $record[-3] );
-		warn "started a new bin: $bin\n";
+		$log->info("started a new bin: $bin");
 	}	
 }
 
@@ -68,6 +89,8 @@ sub print_out {
 	for my $i ( 0 .. $#gendist ) {
 		push @genpergeo, $gendist[$i] / $geodist[$i] if $geodist[$i];
 	}
-	my $genpergeo = sum(@genpergeo)/scalar(@genpergeo);
-	print $bin, "\t", $genpergeo, "\t", $meanlat, "\n";
+	if ( scalar @genpergeo ) {
+		my $genpergeo = sum(@genpergeo)/scalar(@genpergeo);
+		print $bin, "\t", $genpergeo, "\t", $meanlat, "\n";
+	}
 }

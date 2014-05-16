@@ -89,7 +89,7 @@ sub get_next_bin {
 		
 		# if the next sequence has the same bin ID as the
 		# focal one, recurse onwards to the next next
-		if ( get_fields($next->id,$tid) eq $binid ) {
+		if ( $next and get_fields($next->id,$tid) eq $binid ) {
 			push @$bin, $next;
 			$log->debug("extending bin $binid");
 			return get_next_bin( $seqio, $next, $bin );
@@ -277,6 +277,7 @@ sub main {
 			print join "\t", @record;
 			print "\n";	
 		}	
+		last unless $seq;
 	}
 }
 

@@ -11,6 +11,9 @@ use Bio::Tools::Run::Alignment::Muscle;
 use Bio::Phylo::Util::Logger ':levels';
 use constant PI => 4 * atan2(1, 1);
 
+# don't complain about deep recursion when assembling bins
+no warnings 'recursion';
+
 # minimum bin size
 my $binsize = 2;
 
@@ -69,31 +72,45 @@ sub get_fields {
 # move the cursor to the next bin
 sub get_next_bin {
 	my $seqio = shift;
-	my @bin;
-	if ( my $first = $seqio->next_seq ) {
-		push @bin, $first;
 	
-		# get the bin id from the definition line
-		my $id = $first->id();
-		my $bin = get_fields($id,$tid);
+	# either there is a focal sequence, or we are at the start of 
+	# the file and the reader returns it, or we are at the end
+	# of the file and we pass through this branch
+	if ( my $current = shift || $seqio->next_seq ) {
 	
-		# advance the cursor until the bin id changes
-		BIN: while( my $seq = $seqio->next_seq ) {
-			my $binid = get_fields($seq->id(),$tid);
+		# either an array has been passed in because we are in 
+		# a recursion or we create a new one that we populate
+		# with the focal sequence
+		my $bin = shift || [ $current ];
 		
-			# break out the loop if the bin id changes
-			last BIN if $binid ne $bin;
+		# fetch the next sequence and the focal bin ID
+		my $binid = get_fields($current->id,$tid);
+		my $next  = $seqio->next_seq;
 		
-			# grow the set
-			push @bin, $seq;
+		# if the next sequence has the same bin ID as the
+		# focal one, recurse onwards to the next next
+		if ( get_fields($next->id,$tid) eq $binid ) {
+			push @$bin, $next;
+			$log->debug("extending bin $binid");
+			return get_next_bin( $seqio, $next, $bin );
 		}
-		if ( @bin >= $binsize ) {
-			$log->info("going to align bin $bin");
-			return $bin, $aln->align(\@bin);
-		}
+		
+		# we're at the end of the bin
 		else {
-			$log->info("bin $bin has fewer than $binsize specimens, skipping");
-			get_next_bin($seqio);
+		
+			# it's large enough to use, return the alignment
+			if ( @$bin >= $binsize ) {
+				my $alignment = $aln->align($bin);
+				$alignment->id($binid);
+				$log->info("aligned bin ".$alignment->id);
+				return $next, $alignment;
+			}
+			
+			# it's too small, move on to the next bin
+			else {
+				$log->info("bin $binid has fewer than $binsize specimens, skipping");
+				return get_next_bin($seqio,$next);
+			}	
 		}
 	}
 	return undef;
@@ -116,7 +133,7 @@ sub get_genetic_distances {
 			my $s2 = Bio::Phylo::Matrices::Datum->new_from_bioperl( $seq[$j] );
 			my $s2name = get_fields($s2->get_name,$sid);			
 			my $dist = $s1->calc_distance($s2);	
-			$log->info("calculating distance between $s1name and $s2name: $dist");			
+			$log->debug("calculating distance between $s1name and $s2name: $dist");			
 			push @result, [ $s1name, $s2name, $dist ];
 		}
 	}
@@ -144,7 +161,7 @@ sub get_geographical_distances {
 			my $def2 = join ' ', $seq[$j]->id, $seq[$j]->desc;
 			my $s2name = get_fields( $def2, $sid );
 			my @s2xy = get_fields( $def2, $lon, $lat );	
-			$log->info("x1,y1=@s1xy x2,y2=@s2xy");								
+			$log->debug("x1,y1=@s1xy x2,y2=@s2xy");								
 			push @result, { 
 				'seqid1'  => $s1name,
 				's1lon'   => $s1xy[0],
@@ -152,7 +169,7 @@ sub get_geographical_distances {
 				'seqid2'  => $s2name, 
 				's2lon'   => $s2xy[0],
 				's2lat'   => $s2xy[1],				
-				'geodist' => calc_dist(@s1xy,@s2xy),
+				'geodist' => calc_dist($s1name,$s2name,@s1xy,@s2xy),
 				'meanlat' => ( ( $s1xy[1] + $s2xy[1] ) / 2 ),
 			};
 		}
@@ -164,11 +181,29 @@ sub get_geographical_distances {
 # calls R to calculate the great circle "Vincenty Ellipsoid" distance between two points. 
 # requires the R package 'geosphere'. returns a single distance.
 sub calc_dist {
-	my @points = @_;
+	my ($s1,$s2,@points) = @_;
 	my @r = @points;
+	
+	# coordinates are passed in as lon, lat, lon, lat
+	# longitudes range between -180 and 180
+	# latitudes range between -90 and 90
 	for my $i ( 0 .. $#r ) {
-		if ( $r[$i] < -90 or $r[$i] > 90 ) {
-			$log->warn("coordinate out of allowed range (-90 < value < 90): $r[$i]");
+		
+		# the first two numbers are the coordinates for $s1,
+		# the next two numbers are those for $s2
+		my $id = $i <= 1 ? $s1 : $s2;
+		
+		# if the number's index is odd (i.e. $i % 2 == 1),
+		# the number is a latitude, otherwise a longitude
+		my $type = $i % 2 ? 'latitude' : 'longitude';
+		
+		# if the number is a latitude, its minimum is -90,
+		# otherwise it is -180
+		my $min = $type eq 'latitude' ? -90 : -180;
+		my $max = $min * -1;
+
+		if ( $r[$i] < $min or $r[$i] > $max ) {
+			$log->warn("$type for $id out of allowed range ($min < value < $max): $r[$i]");
 			return undef;
 		}
 	}
@@ -181,7 +216,7 @@ R
 	$log->debug("going to run R:\n$command");
 	$R->run($command);
 	my $result = $R->get('result');
-	$log->info("distance is ".$result->[1]);
+	$log->debug("distance is ".$result->[1]);
 	return $result->[1] / 1000;
 }
 
@@ -208,16 +243,18 @@ sub main {
 	print "\n";
 	
 	# iterate over acceptable bins
-	while( my ( $bin, $aln ) = get_next_bin($seqio) ) {
-		last unless $bin and $aln;
+	my ( $alignment, $seq );
+	while( ( $seq, $alignment ) = get_next_bin( $seqio, $seq ) ) {
+		last unless $alignment;
+		my $bin = $alignment->id;
 		
 		# calculate the genetic distances
 		$log->info("going to calculate genetic distances in bin $bin");
-		my @gendist = get_genetic_distances($aln);
+		my @gendist = get_genetic_distances($alignment);
 		
 		# calculate geographic distance
 		$log->info("going to calculate geographic distances in bin $bin");
-		my @geodist = get_geographical_distances($aln);
+		my @geodist = get_geographical_distances($alignment);
 		
 		# iterate over specimen pairs
 		for my $i ( 0 .. $#gendist ) {

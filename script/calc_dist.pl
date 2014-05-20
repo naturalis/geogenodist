@@ -4,6 +4,7 @@ use warnings;
 use Getopt::Long;
 use Data::Dumper;
 use Statistics::R;
+use Scalar::Util 'looks_like_number';
 use Bio::AlignIO;
 use Bio::SeqIO;
 use Bio::Phylo::Matrices::Datum;
@@ -196,6 +197,12 @@ sub calc_dist {
 		# if the number's index is odd (i.e. $i % 2 == 1),
 		# the number is a latitude, otherwise a longitude
 		my $type = $i % 2 ? 'latitude' : 'longitude';
+		
+		# check if we have a number at all
+		if ( not looks_like_number $r[$i] ) {
+			$log->warn("$type for $id is not a valid number: '$r[$i]'");
+			return undef;
+		}		
 		
 		# if the number is a latitude, its minimum is -90,
 		# otherwise it is -180

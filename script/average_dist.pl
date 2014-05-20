@@ -12,10 +12,12 @@ use Bio::Phylo::Util::Logger ':levels';
 my $verbosity = WARN;
 my $minpairs = 10;
 my $infile;
+my $absolute;
 GetOptions(
 	'minpairs=i' => \$minpairs,
 	'infile=s'   => \$infile,
 	'verbose+'   => \$verbosity,
+	'absolute'   => \$absolute,
 );
 
 # instantiate helper objects
@@ -85,6 +87,7 @@ print_out();
 
 sub print_out {
 	my $meanlat = sum(@meanlat)/scalar(@meanlat);
+	$meanlat = abs($meanlat) if $absolute;
 	my @genpergeo;
 	for my $i ( 0 .. $#gendist ) {
 		push @genpergeo, $gendist[$i] / $geodist[$i] if $geodist[$i];
